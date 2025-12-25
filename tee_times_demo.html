@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sterling Hills Tee Times</title>
+</head>
+<body>
+  <h1>Sterling Hills Tee Times</h1>
+
+  <label>
+    Date:
+    <input type="date" id="date" />
+  </label>
+  <button id="show-times">Show Available Times</button>
+
+  <h2>Available Times</h2>
+  <ul id="times-list"></ul>
+
+  <script>
+    // This MUST match your FastAPI server:
+    const BACKEND_BASE = "http://127.0.0.1:8000";
+
+    async function loadTimes() {
+      const dateInput = document.getElementById("date");
+      const list = document.getElementById("times-list");
+      list.innerHTML = "";
+
+      const dateValue = dateInput.value; // format: 2025-12-21
+      if (!dateValue) {
+        alert("Please pick a date first.");
+        return;
+      }
+
+      const url =
+        `${BACKEND_BASE}/availability` +
+        `?course_id=sterling_hills` +
+        `&date=${dateValue}` +
+        `&time_window=all` +
+        `&players=4` +
+        `&holes=18` +
+        `&walk_ride=riding`;
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+        const data = await response.json();
+
+        const times = data.available_times || [];
+        if (times.length === 0) {
+          list.innerHTML = "<li>No tee times available.</li>";
+          return;
+        }
+
+        times.forEach((iso) => {
+          const li = document.createElement("li");
+
+          const d = new Date(iso);
+          const timeOnly = d.toLocaleTimeString([], {
+            hour: "numeric",
+            minute: "2-digit",
+          });
+
+          li.textContent = timeOnly;
+          li.style.cursor = "pointer";
+
+          // When you click a time, try to book it
+          li.addEventListener("click", () => bookTime(iso, timeOnly));
+
+          list.appendChild(li);
+        });
+      } catch (err) {
+        console.error(err);
+        alert("Could not reach backend. Is uvicorn running?");
+      }
+    }
+
+    async function bookTime(isoString, label) {
+      const name = prompt(`Booking ${label}. Enter golfer name:`);
+      if (!name) return;
+
+      const phone = prompt("Enter phone number:");
+      if (!phone) return;
+
+      const body = {
+        course_id: "sterling_hills",
+        date_time: isoString,
+        players: 4,
+        holes: 18,
+        walk_ride: "riding",
+        name: name,
+        phone: phone,
+      };
+
+      try {
+        const response = await fetch(`${BACKEND_BASE}/booking`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const msg =
+            (errorData && errorData.detail) ||
+            `HTTP ${response.status}`;
+          alert("Booking failed: " + msg);
+          return;
+        }
+
+        const data = await response.json();
+        alert(`Booked! ID: ${data.booking_id} at ${label} for ${name}.`);
+
+        // Refresh the list so that time disappears
+        await loadTimes();
+      } catch (err) {
+        console.error(err);
+        alert("Error contacting booking API.");
+      }
+    }
+
+    document
+      .getElementById("show-times")
+      .addEventListener("click", loadTimes);
+  </script>
+</body>
+</html>
+
