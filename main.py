@@ -1,3 +1,5 @@
+MAX_PLAYERS_PER_TEE = 4  # max players allowed in a single tee time
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -110,17 +112,18 @@ def get_availability(
 
     course = COURSES[course_id]
 
-    # All possible tee times for that date
-    all_slots = _generate_slots_for_date(course, date)
+       # How many players are already booked in each tee time
+    players_by_time: dict[datetime, int] = {}
+    for b in BOOKINGS.values():
+        if b.course_id == course_id and b.date_time.date() == date:
+            players_by_time[b.date_time] = players_by_time.get(b.date_time, 0) + b.players
 
-    # Already booked times for that date & course
-    booked = {
-        b.date_time
-        for b in BOOKINGS.values()
-        if b.course_id == course_id and b.date_time.date() == date
-    }
-
-    available = [dt for dt in all_slots if dt not in booked]
+    # Only keep tee times where this group still fits in capacity
+    available = []
+    for dt in all_slots:
+        already = players_by_time.get(dt, 0)
+        if already + players <= MAX_PLAYERS_PER_TEE:
+            available.append(dt)
 
     # Optional time-window filter
     if time_window != "all":
@@ -149,13 +152,18 @@ def create_booking(req: CreateBookingRequest):
     if req.course_id not in COURSES:
         raise HTTPException(status_code=404, detail="Unknown course_id")
 
-    # Check if this exact time is already booked
+       # How many players are already booked into this exact tee time
+    current_players = 0
     for b in BOOKINGS.values():
         if b.course_id == req.course_id and b.date_time == req.date_time:
-            raise HTTPException(
-                status_code=400,
-                detail="That tee time is already booked. Please choose another time.",
-            )
+            current_players += b.players
+
+    # Block if this booking would exceed capacity
+    if current_players + req.players > MAX_PLAYERS_PER_TEE:
+        raise HTTPException(
+            status_code=400,
+            detail="That tee time is full. Please choose another time.",
+        )
 
     booking_id = f"BOOK-{len(BOOKINGS) + 1}"
 
